@@ -20,6 +20,7 @@ struct buf {
 	int		block_no;
 	void		*data;
 	int		size;
+	int		dirty;
 };
 
 typedef struct buf	dsk_buffer;

@@ -1,5 +1,6 @@
 int sprintf (char *, char *, ...);
 int kprintf (char *,  ...);
+int kprintf2(char *,  ...);
 int kputc(int, unsigned char);
 int printf (char *,  ...);
 int fprintf (int, char *,  ...);

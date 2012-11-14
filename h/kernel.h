@@ -74,6 +74,7 @@ typedef short	STATWORD[1];	/* machine status for disable/restore	*/
 #define	isodd(x)	(01&(WORD)(x))
 #define	min(a,b)	( (a) < (b) ? (a) : (b) )
 #define	max(a,b)	( (a) > (b) ? (a) : (b) )
+#define abs(a)		( (a) < 0 ? -(a) : (a) )
 
 extern	int	rdyhead, rdytail;
 extern	int	preempt;
