@@ -21,6 +21,7 @@ struct buf {
 	void		*data;
 	int		size;
 	int		dirty;
+	int		valid;
 };
 
 typedef struct buf	dsk_buffer;
@@ -28,5 +29,7 @@ typedef struct buf	*dsk_buffer_p;
 
 dsk_buffer_p	buf_head;
 int		buf_count;
+
+int		buf_is_open;
 
 #endif

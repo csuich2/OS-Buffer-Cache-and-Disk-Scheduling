@@ -10,6 +10,44 @@ static void print_stat(disk_desc *ptr);
  */
 int dskclose(struct devsw *pdev) {
 	disk_desc *ptr;
+	dsk_buffer_p previous, current;
+	STATWORD *ps;
+
+	disable(ps);
+
+	current = buf_head;
+	previous = (dsk_buffer_p)NULL;
+	// Traverse the list of buffer cache blocks
+	while (current != (dsk_buffer_p)NULL) {
+		// If we find one for this disk
+		if (current->pdev == pdev) {
+			// Save a reference to the next one
+			dsk_buffer_p next = current->next;
+			// If this is the first block, point the head
+			// to the next block
+			if (previous == (dsk_buffer_p)NULL) {
+				buf_head = next;
+			// Otherwise point previous to the next block
+			} else {
+				previous->next = next;
+			}
+			// Release the data member
+			freemem(current->data, 128);
+			// Release the buffer cache block itself
+			freemem(current, sizeof(struct buf));
+			// Update the buffer block count
+			buf_count--;
+			// Move on to the next block
+			current = next;
+			// previous stays the same
+		// Otherwise move on to the next block
+		} else {
+			previous = current;
+			current = current->next;
+		}
+	}
+
+	restore(ps);
 
 	ptr = (disk_desc *)pdev -> dvioblk;
 

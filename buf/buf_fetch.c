@@ -9,7 +9,7 @@ extern int dskwrite(struct devsw *pdev, char *buffer, int block_no, int count);
 extern int memncpy(void *dest, void *src, int num);
 
 dsk_buffer_p findExistingBuffer(struct devsw *pdev, int block_no, int policy, int updateUsage);
-int bringBlockIntoBuffer(struct devsw *pdev, int block_no, dsk_buffer_p target);
+dsk_buffer_p bringBlockIntoBuffer(struct devsw *pdev, int block_no, int performRead, STATWORD *ps);
 
 /*
  * Part A 3/4. buf_fetch()
@@ -26,15 +26,16 @@ int bringBlockIntoBuffer(struct devsw *pdev, int block_no, dsk_buffer_p target);
  */
 dsk_buffer_p buf_fetch(struct devsw *pdev, int block_no, int policy) {
 	disk_desc *ptr;
-	dsk_buffer_p target;
-	int i;
+	dsk_buffer_p target, prefetch;
 	STATWORD ps;
+	int i;
 
 	disable(ps);
+
 	// Check to make sure the devices is not null
-	if (!pdev) {
+	if (!pdev || !buf_is_open) {
 		restore(ps);
-		return (dsk_buffer_p)SYSERR;
+		return (dsk_buffer_p)INVALID_BLOCK;
 	}
 	
 	// Get the disk_desc and check that the requested block
@@ -42,25 +43,30 @@ dsk_buffer_p buf_fetch(struct devsw *pdev, int block_no, int policy) {
 	ptr = (disk_desc *)pdev->dvioblk;
 	if (block_no < 0 || block_no >= ptr->logical_blocks) {
 		restore(ps);
-		return (dsk_buffer_p)SYSERR;
+		return (dsk_buffer_p)INVALID_BLOCK;
 	}
 
 	// Check to see if this block already exists in the buffer and update
 	// its usage if policy is LRU
 	target = findExistingBuffer(pdev, block_no, policy, 1);
+
+	// If target != NULL, then cache hit occured, we can return the block
 	if (target != (dsk_buffer_p)NULL) {
+		// If this block is not valid, that means someone else is reading or writing
+		// the block into the cache, so keep sleeping until it is valid
 		restore(ps);
+		while (!target->valid) {
+			sleep(1);
+		}
+		// Once the block is valid, return
 		return target;
 	}
 
 	// If we get here, then we did not find the block in the buffer and must bring
 	// it into the buffer (and evict one if necessary)
 
-	int status = OK;
-	int ret = bringBlockIntoBuffer(pdev, block_no, target);
-	if (ret != OK) {
-		status = ret;
-		target = (dsk_buffer_p)NULL;
+	if ((target = bringBlockIntoBuffer(pdev, block_no, 1, ps)) == (dsk_buffer_p)INVALID_BLOCK) {
+		return (dsk_buffer_p)INVALID_BLOCK;
 	}
 
 	// Now we need to prefetch blocks, which is a very similar process, but
@@ -71,14 +77,19 @@ dsk_buffer_p buf_fetch(struct devsw *pdev, int block_no, int policy) {
 		if (ptr->logical_blocks <= block_no+i)
 			break;
 	
-		// See if this block already exists in the buffer
-		target = findExistingBuffer(pdev, block_no, policy, 0);
+		prefetch = findExistingBuffer(pdev, block_no+i, policy, 0);
 		// If it does, bail out
-		if (target != (dsk_buffer_p)NULL)
+		if (prefetch != (dsk_buffer_p)NULL) {
 			continue;
-		
+		}
+
 		// Otherwise, we need to bring it into the buffer
-		bringBlockIntoBuffer(pdev, block_no+i, target);
+		if ((prefetch = bringBlockIntoBuffer(pdev, block_no+i, 1, ps)) == (dsk_buffer_p)INVALID_BLOCK) {
+			restore(ps);
+			// If something goes wrong, just return target, since that is they block
+			// that was actually asked for
+			return (dsk_buffer_p)target;
+		}
 	}
 
 	restore(ps);
@@ -122,8 +133,8 @@ dsk_buffer_p findExistingBuffer(struct devsw *pdev, int block_no, int policy, in
 	return (dsk_buffer_p)NULL;
 }
 
-int bringBlockIntoBuffer(struct devsw *pdev, int block_no, dsk_buffer_p target) {
-	dsk_buffer_p previous;
+dsk_buffer_p bringBlockIntoBuffer(struct devsw *pdev, int block_no, int performRead, STATWORD *ps) {
+	dsk_buffer_p target, previous;
 
 	// If the buffer is full, we need to evict an entry
 	if (buf_count == PA4_BUFFER_SIZE) {
@@ -149,7 +160,11 @@ int bringBlockIntoBuffer(struct devsw *pdev, int block_no, dsk_buffer_p target) 
 		// If the write policy is POLICY_DELAYED_WRITE and this entry is dirty, then
 		// we need to write it to the disk
 		if (PA4_WRITE_POLICY == POLICY_DELAYED_WRITE && target->dirty == 1) {
+			target->valid = 0;
+			restore(ps);
 			dskwrite(target->pdev, target->data, target->block_no, 1);
+			disable(ps);
+			target->valid = 1;
 		}
 	// Otherwise, since the buffer is not full, we need to allocate a new buffer entry
 	// and bump the buf_count variable
@@ -157,12 +172,12 @@ int bringBlockIntoBuffer(struct devsw *pdev, int block_no, dsk_buffer_p target) 
 		target = (dsk_buffer_p)getmem(sizeof(struct buf));
 		// If there was an error allocating the new buffer entry, bail out
 		if (target == (dsk_buffer_p)NULL) {
-			return SYSERR;
+			return (dsk_buffer_p)INVALID_BLOCK;
 		}
 		// Allocate space for the data of this block
 		target->data = (void*)getmem(128);
 		if (target == (void*)NULL) {
-			return SYSERR;
+			return (dsk_buffer_p)INVALID_BLOCK;
 		}
 		// Bump the buf_count
 		buf_count++;
@@ -185,10 +200,21 @@ int bringBlockIntoBuffer(struct devsw *pdev, int block_no, dsk_buffer_p target) 
 	target->dirty = 0;
 	// Always set the size to 128
 	target->size = 128;
-	// Now read the data from the disk and set it into the target's data
-	if (dskread(pdev, target->data, block_no, 1) == SYSERR) {
-		return SYSERR;
+	// Set the valid flag to 0 since we're about to start reading it
+	target->valid = 0;
+
+	// If we want to read in the new block...
+	if (performRead) {
+		restore(ps);
+		// Now read the data from the disk and set it into the target's data
+		if (dskread(pdev, target->data, block_no, 1) == SYSERR) {
+			disable(ps);
+			return (dsk_buffer_p)INVALID_BLOCK;
+		}
+		disable(ps);
+		// Now that the block is read and in the cache, it is valid
+		target->valid = 1;
 	}
 
-	return OK;
+	return target;
 }

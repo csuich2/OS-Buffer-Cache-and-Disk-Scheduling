@@ -9,7 +9,7 @@ extern int dskwrite(struct devsw *pdev, char *buffer, int block_no, int count);
 extern int memncpy(void *dest, void *src, int num);
 
 extern dsk_buffer_p findExistingBuffer(struct devsw *pdev, int block_no, int policy, int updateUsage);
-extern int bringBlockIntoBuffer(struct devsw *pdev, int block_no, dsk_buffer_p target);
+extern dsk_buffer_p bringBlockIntoBuffer(struct devsw *pdev, int block_no, int performRead, STATWORD *ps);
 
 /*
  * Part A 4/4. buf_put()
@@ -23,11 +23,12 @@ extern int bringBlockIntoBuffer(struct devsw *pdev, int block_no, dsk_buffer_p t
 int buf_put(struct devsw *pdev, int block_no, char *buffer, int policy) {
 	disk_desc *ptr;
 	dsk_buffer_p target, previous;
-	STATWORD ps;
-	
+	STATWORD *ps;
+
 	disable(ps);
+
 	// Check to make sure the devices is not null
-	if (!pdev) {
+	if (!pdev || !buf_is_open) {
 		restore(ps);
 		return SYSERR;
 	}
@@ -37,7 +38,7 @@ int buf_put(struct devsw *pdev, int block_no, char *buffer, int policy) {
 		restore(ps);
 		return SYSERR;
 	}
-	
+
 	// Get the disk_desc and check that the requested block
 	// number is valid
 	ptr = (disk_desc *)pdev->dvioblk;
@@ -46,27 +47,31 @@ int buf_put(struct devsw *pdev, int block_no, char *buffer, int policy) {
 		return SYSERR;
 	}
 
-	// Check to see if this block already exists in the buffer and update
-	// its usage if policy is LRU
+	// We need to check if the block is already in the cache
 	target = findExistingBuffer(pdev, block_no, policy, 1);
+	// If it is not
 	if (target == (dsk_buffer_p)NULL) {
-		int ret = bringBlockIntoBuffer(pdev, block_no, target);
-		if (ret != OK) {
-			restore(ps);
-			return ret;
+		// Bring it into the cache, but DON't submit a read request
+		if ((target = bringBlockIntoBuffer(pdev, block_no, 0, ps)) == (dsk_buffer_p)INVALID_BLOCK) {
+			return SYSERR;
 		}
 	}
-
-	// Copy the buffer data into this blocks data
+	// Copy the passed buffer into the data
 	memncpy(target->data, buffer, 128);
 
-	// Now that we have the buffer target, write the data to that block
+	// Write the data to that block, or just mark it as dirty
 	if (policy == POLICY_WRITE_THROUGH) {
-		dskwrite(target->pdev, target->data, target->block_no, 1);
+		target->valid = 0;
+		restore(ps);
+		dskwrite(pdev, buffer, block_no, 1);
+		target->valid = 1;
 	} else { //if (policy == POLICY_DELAYED_WRITE) {
+		// Set the target as valid now that we have populated the data
+		target->valid = 1;
+		// Set the block as dirty
 		target->dirty = 1;
+		restore(ps); 
 	}
 
-	restore(ps);
 	return OK;
 }

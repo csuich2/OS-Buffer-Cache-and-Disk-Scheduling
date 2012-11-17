@@ -32,7 +32,7 @@ int buf_read(struct devsw *pdev, char *buffer, int block_no) {
 	}
 
 	restore(ps);
-	if((target = buf_fetch(pdev, block_no, PA4_BUFFER_REPLACEMENT)) == INVALID_BLOCK) 
+	if((target = buf_fetch(pdev, block_no, PA4_BUFFER_REPLACEMENT)) == INVALID_BLOCK)
 		return SYSERR;
 	
 	code = memncpy(buffer, target -> data, target -> size);

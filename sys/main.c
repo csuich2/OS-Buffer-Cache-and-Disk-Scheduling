@@ -17,7 +17,6 @@ Bool	test2(void);
 Bool	test3(void);
 Bool	test4(void);
 Bool	test5(void);
-Bool	test6(void);
 
 int	process1(char c);
 int	process2(char c);
@@ -26,12 +25,11 @@ int	process3(char c);
 int main() {
 	Bool success = FALSE;
 
-	test1();
+//	test1();
 //	test2();
 //	test3();
 //	test4();
-//	test5();
-//	test6();
+	test5();
 
 	return 0;
 }
@@ -101,7 +99,7 @@ Bool test4(void) {
 Bool test5(void) {
 	int process[8];
 	int index;
-	int disk = DISK0;
+	int disk = DISK1;
 
 	open(disk, 0, 0);
 
@@ -109,31 +107,6 @@ Bool test5(void) {
 		resume(process[index] = create(process3, 2000, 30, "Process", 1, (char)disk));
 
 	while(process_count < 8);
-	close(disk);
-
-	return TRUE;
-}
-
-Bool test6(void) {
-	char buffer[128];
-	int disk = DISK0;
-
-	open(disk, 0, 0);
-
-	read(disk, buffer, 10);
-	buffer[0] = 'H';
-	buffer[1] = 'e';
-	buffer[2] = 'l';
-	buffer[3] = 'l';
-	buffer[4] = 'o';
-	buffer[5] = '!';
-	buffer[6] = '\0';
-	write(disk, buffer, 10);
-
-	read(disk, buffer, 11);
-	read(disk, buffer, 10);
-	kprintf("expecting 'Hello!': '%s'\n", buffer);
-
 	close(disk);
 
 	return TRUE;
@@ -159,13 +132,13 @@ int process1(char c) {
 	char ibuffer[128];
 	int disk = (int)c;
 
-	kprintf("got here (process %d)\n", currpid);
 	for(index = 0;index < 1024;index++) {
 		random = rand() % 1024;
 		read(disk, ibuffer, random);
-		kprintf("finished read %d [%d]\n", index, currpid);
+		if (index % 100 == 0)
+			kprintf("index: %d [%d]\n", index, currpid);
 	}
-	//kprintf("got here (the end)\n");
+
 
 	process_count++;
 	return process_count;
@@ -179,6 +152,8 @@ int process2(char c) {
 	for(index = 0;index < 1024;index++) {
 		random = skewed_rand();
 		read(disk, ibuffer, random);
+		if (index % 100 == 0)
+			kprintf("index: %d [%d]\n", index, currpid);
 	}
 	
 	process_count++;
@@ -194,6 +169,8 @@ int process3(char c) {
 		random = rand() % 1024;
 		obuffer[0] = random;
 		write(disk, obuffer, random);
+		if (index % 100 == 0)
+			kprintf("index: %d [%d]\n", index, currpid);
 	}
 	process_count++;
 	return process_count;

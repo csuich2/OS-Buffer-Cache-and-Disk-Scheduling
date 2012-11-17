@@ -37,6 +37,13 @@ void dskschedule(disk_desc *ptr, int option) {
 			insertCLOOKRequest(ptr, curr);
 			curr = next;
 		}
+
+		//kprintf2("clook queue (%d):\n", ptr->head_sector);
+		//curr = ptr->request_head;
+		//while (curr != (request_desc_p)NULL) {
+		//	kprintf2("%d, ", curr->block_no);
+		//	curr = curr->next;
+		//}
 		return;
 	}
 }
